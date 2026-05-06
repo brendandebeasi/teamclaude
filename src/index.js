@@ -384,13 +384,17 @@ async function statusCommand() {
       console.log(`    Status:   ${acct.status}`);
 
       if (q.unified5h != null || q.unified7d != null) {
-        const ses = q.unified5h != null ? (q.unified5h * 100).toFixed(1) + '%' : '-';
-        const wk = q.unified7d != null ? (q.unified7d * 100).toFixed(1) + '%' : '-';
-        console.log(`    Session:  ${ses} used    Weekly: ${wk} used`);
+        const sesRst = formatReset(q.unified5hReset);
+        const wkRst = formatReset(q.unified7dReset);
+        const ses = q.unified5h != null ? (q.unified5h * 100).toFixed(1) + '%' + (sesRst ? ` (resets in ${sesRst})` : '') : '-';
+        const wk = q.unified7d != null ? (q.unified7d * 100).toFixed(1) + '%' + (wkRst ? ` (resets in ${wkRst})` : '') : '-';
+        console.log(`    Session:  ${ses}    Weekly: ${wk}`);
       } else {
-        const tok = q.tokensLimit ? ((1 - q.tokensRemaining / q.tokensLimit) * 100).toFixed(1) + '%' : '-';
-        const req = q.requestsLimit ? ((1 - q.requestsRemaining / q.requestsLimit) * 100).toFixed(1) + '%' : '-';
-        console.log(`    Tokens:   ${tok} used    Requests: ${req} used`);
+        const tokRst = formatReset(q.resetsAt ? new Date(q.resetsAt).getTime() : null);
+        const reqRst = tokRst; // APIs share the resetsAt timestamp
+        const tok = q.tokensLimit ? ((1 - q.tokensRemaining / q.tokensLimit) * 100).toFixed(1) + '%' + (tokRst ? ` (resets in ${tokRst})` : '') : '-';
+        const req = q.requestsLimit ? ((1 - q.requestsRemaining / q.requestsLimit) * 100).toFixed(1) + '%' + (reqRst ? ` (resets in ${reqRst})` : '') : '-';
+        console.log(`    Tokens:   ${tok}    Requests: ${req}`);
       }
 
       console.log(`    Total:    ${acct.usage.totalInputTokens + acct.usage.totalOutputTokens} tokens, ${acct.usage.totalRequests} requests`);
@@ -736,6 +740,20 @@ async function syncAccountsFromDisk(diskConfig, memConfig, accountManager) {
 }
 
 // ── helpers ─────────────────────────────────────────────────
+
+function formatReset(resetTs) {
+  if (!resetTs) return '';
+  const ms = resetTs - Date.now();
+  if (ms <= 0) return '';
+  const mins = Math.ceil(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rm = mins % 60;
+  if (hrs < 24) return rm > 0 ? `${hrs}h${rm}m` : `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  const rh = hrs % 24;
+  return rh > 0 ? `${days}d${rh}h` : `${days}d`;
+}
 
 async function resolveAccounts(config) {
   const accounts = [];
