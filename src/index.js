@@ -378,6 +378,7 @@ async function statusCommand() {
 
     for (const acct of data.accounts) {
       const q = acct.quota;
+      const r = acct.remaining || {};
       const current = acct.name === data.currentAccount ? ' *' : '';
 
       console.log(`  ${acct.name} (${acct.type})${current}`);
@@ -386,14 +387,14 @@ async function statusCommand() {
       if (q.unified5h != null || q.unified7d != null) {
         const sesRst = formatReset(q.unified5hReset);
         const wkRst = formatReset(q.unified7dReset);
-        const ses = q.unified5h != null ? (q.unified5h * 100).toFixed(1) + '%' + (sesRst ? ` (resets in ${sesRst})` : '') : '-';
-        const wk = q.unified7d != null ? (q.unified7d * 100).toFixed(1) + '%' + (wkRst ? ` (resets in ${wkRst})` : '') : '-';
+        const ses = r.session != null ? (r.session * 100).toFixed(1) + '% left' + (sesRst ? ` (resets in ${sesRst})` : '') : '-';
+        const wk = r.weekly != null ? (r.weekly * 100).toFixed(1) + '% left' + (wkRst ? ` (resets in ${wkRst})` : '') : '-';
         console.log(`    Session:  ${ses}    Weekly: ${wk}`);
       } else {
         const tokRst = formatReset(q.resetsAt ? new Date(q.resetsAt).getTime() : null);
         const reqRst = tokRst; // APIs share the resetsAt timestamp
-        const tok = q.tokensLimit ? ((1 - q.tokensRemaining / q.tokensLimit) * 100).toFixed(1) + '%' + (tokRst ? ` (resets in ${tokRst})` : '') : '-';
-        const req = q.requestsLimit ? ((1 - q.requestsRemaining / q.requestsLimit) * 100).toFixed(1) + '%' + (reqRst ? ` (resets in ${reqRst})` : '') : '-';
+        const tok = r.tokens != null ? `${r.tokens} left (${(r.tokensFraction * 100).toFixed(1)}%)` + (tokRst ? ` (resets in ${tokRst})` : '') : '-';
+        const req = r.requests != null ? `${r.requests} left (${(r.requestsFraction * 100).toFixed(1)}%)` + (reqRst ? ` (resets in ${reqRst})` : '') : '-';
         console.log(`    Tokens:   ${tok}    Requests: ${req}`);
       }
 
