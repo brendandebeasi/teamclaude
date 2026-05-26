@@ -29,6 +29,7 @@ export class AccountManager {
       expiresAt: acct.expiresAt || null,
       status: 'active',
       quota: emptyQuota(),
+      lastQuotaAt: null,
       usage: {
         totalInputTokens: 0,
         totalOutputTokens: 0,
@@ -157,8 +158,10 @@ export class AccountManager {
 
   /**
    * Update an account's quota tracking from upstream response headers.
+   * Set countRequest=false for background probes so they don't inflate the
+   * per-account request/usage totals (which should reflect real client traffic).
    */
-  updateQuota(accountIndex, headers) {
+  updateQuota(accountIndex, headers, { countRequest = true } = {}) {
     const account = this.accounts[accountIndex];
     if (!account) return;
 
@@ -192,8 +195,11 @@ export class AccountManager {
     if (tokensReset) account.quota.resetsAt = tokensReset;
     else if (requestsReset) account.quota.resetsAt = requestsReset;
 
-    account.usage.totalRequests++;
-    account.usage.lastUsed = new Date().toISOString();
+    account.lastQuotaAt = Date.now();
+    if (countRequest) {
+      account.usage.totalRequests++;
+      account.usage.lastUsed = new Date().toISOString();
+    }
 
     // Log when approaching quota
     if (this._isNearQuota(account)) {
@@ -306,6 +312,7 @@ export class AccountManager {
       expiresAt: acctData.expiresAt || null,
       status: 'active',
       quota: emptyQuota(),
+      lastQuotaAt: null,
       usage: { totalInputTokens: 0, totalOutputTokens: 0, totalRequests: 0, lastUsed: null },
       rateLimitedUntil: null,
     });

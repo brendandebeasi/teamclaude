@@ -7,6 +7,7 @@ import { AccountManager } from './account-manager.js';
 import { createProxyServer } from './server.js';
 import { importCredentials, loginOAuth, fetchProfile, refreshAccessToken, isTokenExpiringSoon } from './oauth.js';
 import { TUI } from './tui.js';
+import { Prober } from './prober.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -139,6 +140,14 @@ async function serverCommand() {
     return result;
   }
 
+  // Background quota prober — periodically pings idle accounts to learn their
+  // utilization + reset times (config.pokeIntervalMs, default 10 min; 0 = off).
+  const prober = new Prober({
+    accountManager,
+    upstream: config.upstream,
+    intervalMs: config.pokeIntervalMs ?? 600000,
+  });
+
   let tui = null;
   let hooks = {};
 
@@ -168,7 +177,7 @@ async function serverCommand() {
         if (!diskConfig) return 0;
         return syncAccountsFromDisk(diskConfig, config, accountManager);
       },
-      onQuit: () => { server.close(() => process.exit(0)); },
+      onQuit: () => { prober.stop(); server.close(() => process.exit(0)); },
     });
     hooks = {
       onRequestStart: (id, info) => tui.onRequestStart(id, info),
@@ -176,6 +185,10 @@ async function serverCommand() {
       onRequestEnd: (id, info) => tui.onRequestEnd(id, info),
     };
   }
+
+  // Feed real /v1/messages traffic to the prober so it can learn the
+  // OAuth-acceptable request shape (works in both TUI and headless modes).
+  hooks.recordPoke = (headers, body) => prober.recordTemplate(headers, body);
 
   const server = createProxyServer(accountManager, config, hooks, { reload: reloadAccounts });
 
@@ -203,14 +216,17 @@ async function serverCommand() {
       console.log(sep);
       console.log('');
     }
+    prober.start();
   });
 
   if (!tui) {
     process.on('SIGINT', () => {
+      prober.stop();
       console.log('\n[TeamClaude] Shutting down...');
       server.close(() => process.exit(0));
     });
     process.on('SIGTERM', () => {
+      prober.stop();
       console.log('\n[TeamClaude] Shutting down...');
       server.close(() => process.exit(0));
     });

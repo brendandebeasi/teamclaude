@@ -289,6 +289,14 @@ async function forwardRequest(req, res, body, accountManager, upstream, retryCou
 
     ctx.status = upstreamRes.status;
 
+    // Learn the OAuth-acceptable request shape from successful Claude Code
+    // traffic so the quota prober can replay it against idle accounts. Only on
+    // 2xx, so a rejected model/beta/system never poisons the template.
+    if (upstreamRes.status >= 200 && upstreamRes.status < 300 &&
+        req.method === 'POST' && req.url.startsWith('/v1/messages')) {
+      hooks.recordPoke?.(req.headers, body);
+    }
+
     // Build response headers (skip hop-by-hop and encoding headers)
     const responseHeaders = {};
     for (const [key, value] of upstreamRes.headers.entries()) {
