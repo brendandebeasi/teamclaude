@@ -327,6 +327,33 @@ export class AccountManager {
   }
 
   /**
+   * Compute remaining quota from a quota object. Fractions are 0-1 (1 = full).
+   * For Claude Max (unified) only utilization is reported, so remaining is a
+   * fraction; for API-key accounts absolute token/request counts are available.
+   */
+  _remainingSummary(q) {
+    const r = {
+      session: null,      // fraction 0-1 (Claude Max 5h)
+      weekly: null,       // fraction 0-1 (Claude Max 7d)
+      tokens: null,       // absolute tokens remaining (API key)
+      tokensFraction: null,
+      requests: null,     // absolute requests remaining (API key)
+      requestsFraction: null,
+    };
+    if (q.unified5h != null) r.session = Math.max(0, 1 - q.unified5h);
+    if (q.unified7d != null) r.weekly = Math.max(0, 1 - q.unified7d);
+    if (q.tokensLimit != null && q.tokensRemaining != null) {
+      r.tokens = q.tokensRemaining;
+      r.tokensFraction = q.tokensLimit > 0 ? q.tokensRemaining / q.tokensLimit : null;
+    }
+    if (q.requestsLimit != null && q.requestsRemaining != null) {
+      r.requests = q.requestsRemaining;
+      r.requestsFraction = q.requestsLimit > 0 ? q.requestsRemaining / q.requestsLimit : null;
+    }
+    return r;
+  }
+
+  /**
    * Return a status summary of all accounts (safe to expose, no credentials).
    */
   getStatus() {
@@ -338,6 +365,7 @@ export class AccountManager {
         type: a.type,
         status: a.status,
         quota: { ...a.quota },
+        remaining: this._remainingSummary(a.quota),
         usage: { ...a.usage },
         rateLimitedUntil: a.rateLimitedUntil
           ? new Date(a.rateLimitedUntil).toISOString()
