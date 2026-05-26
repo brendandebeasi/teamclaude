@@ -17,6 +17,7 @@ export function createDefaultConfig() {
     },
     upstream: 'https://api.anthropic.com',
     switchThreshold: 0.98,
+    pokeIntervalMs: 600000,
     accounts: [],
   };
 }
