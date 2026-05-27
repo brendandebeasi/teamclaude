@@ -633,21 +633,35 @@ async function apiCommand() {
 async function removeCommand() {
   const config = await loadOrCreateConfig();
   const name = args[1];
+  const org = argValue('--org');
 
   if (!name) {
-    console.error('Usage: teamclaude remove <account-name>');
+    console.error('Usage: teamclaude remove <account-name|email> [--org <orgName>]');
     process.exit(1);
   }
 
-  const idx = config.accounts.findIndex(a => a.name === name);
-  if (idx < 0) {
-    console.error(`Account "${name}" not found`);
+  // Match the exact display name, or — since the same email can span multiple
+  // orgs (named "email (orgName)") — the bare email of any such account. --org
+  // disambiguates when an email maps to more than one org.
+  const emailBase = a => a.name.replace(/ \([^()]*\)$/, '');
+  let matches = config.accounts.filter(a => a.name === name || emailBase(a) === name);
+  if (org) matches = matches.filter(a => (a.orgName || '') === org);
+
+  if (matches.length === 0) {
+    console.error(`Account "${name}"${org ? ` (org "${org}")` : ''} not found`);
+    process.exit(1);
+  }
+  if (matches.length > 1) {
+    console.error(`"${name}" is ambiguous — it matches ${matches.length} accounts:`);
+    for (const m of matches) console.error(`  - ${m.name}${m.orgName ? `   [org: ${m.orgName}]` : ''}`);
+    console.error('\nRe-run with the exact account name, or add --org <orgName>.');
     process.exit(1);
   }
 
-  config.accounts.splice(idx, 1);
+  const target = matches[0];
+  config.accounts.splice(config.accounts.indexOf(target), 1);
   await saveConfig(config);
-  console.log(`Removed account "${name}"`);
+  console.log(`Removed account "${target.name}"`);
   await notifyRunningServer(config);
 }
 
@@ -667,12 +681,13 @@ Commands:
   run [-- args...]    Run Claude Code through the proxy
   status              Show proxy & account status (live)
   accounts            List configured accounts
-  remove <name>       Remove an account
+  remove <name>       Remove an account (by exact name or email; --org to disambiguate)
   api <path>          Call an API endpoint with account credentials
   help                Show this help
 
 Options:
   --name NAME         Set account name (import/login)
+  --org NAME          Disambiguate remove when an email spans multiple orgs
   --from PATH         Credentials path (import, default: ~/.claude/.credentials.json)
   --json JSON         Import from inline JSON (import), e.g.:
                       --json '{"accessToken":"...","refreshToken":"...","expiresAt":1234}'
