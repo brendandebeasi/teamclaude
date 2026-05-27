@@ -26,6 +26,7 @@ export class AccountManager {
       accountUuid: acct.accountUuid || null,
       orgUuid: acct.orgUuid || null,
       orgName: acct.orgName || null,
+      priority: Number.isFinite(acct.priority) ? acct.priority : 0,
       credential: acct.accessToken || acct.apiKey,
       refreshToken: acct.refreshToken || null,
       expiresAt: acct.expiresAt || null,
@@ -45,15 +46,23 @@ export class AccountManager {
   }
 
   /**
-   * Get the best available account, rotating if the current one is near quota.
-   * Returns null if all accounts are exhausted.
+   * Get the best available account by priority (lower `priority` = preferred),
+   * ties broken by config order. Always prefers the highest-priority available
+   * account, so it switches back up the moment a higher-priority one recovers.
+   * Returns null if all accounts are exhausted/unavailable.
    */
   getActiveAccount() {
-    const current = this.accounts[this.currentIndex];
-    if (this._isAvailable(current)) {
-      return current;
+    const available = this.accounts.filter(a => this._isAvailable(a));
+    if (available.length > 0) {
+      available.sort((a, b) => (a.priority - b.priority) || (a.index - b.index));
+      const best = available[0];
+      if (best.index !== this.currentIndex) {
+        this.currentIndex = best.index;
+        console.log(`[TeamClaude] Using account "${best.name}" (priority ${best.priority})`);
+      }
+      return best;
     }
-    return this._selectNext();
+    return this._selectExhaustedFallback();
   }
 
   _isAvailable(account) {
@@ -117,21 +126,9 @@ export class AccountManager {
     return false;
   }
 
-  _selectNext() {
-    const startIndex = this.currentIndex;
-
-    for (let i = 1; i <= this.accounts.length; i++) {
-      const idx = (startIndex + i) % this.accounts.length;
-      const account = this.accounts[idx];
-
-      if (this._isAvailable(account)) {
-        this.currentIndex = idx;
-        console.log(`[TeamClaude] Switched to account "${account.name}"`);
-        return account;
-      }
-    }
-
-    // All accounts unavailable — find the one that resets soonest
+  // All accounts unavailable — return the one that resets soonest (only if its
+  // reset time has already passed; otherwise null so the caller returns 429).
+  _selectExhaustedFallback() {
     let soonestAccount = null;
     let soonestTime = Infinity;
 
@@ -338,6 +335,7 @@ export class AccountManager {
       accountUuid: acctData.accountUuid || null,
       orgUuid: acctData.orgUuid || null,
       orgName: acctData.orgName || null,
+      priority: Number.isFinite(acctData.priority) ? acctData.priority : 0,
       credential: acctData.accessToken || acctData.apiKey,
       refreshToken: acctData.refreshToken || null,
       expiresAt: acctData.expiresAt || null,
@@ -402,6 +400,7 @@ export class AccountManager {
         name: a.name,
         type: a.type,
         orgName: a.orgName || null,
+        priority: a.priority,
         status: a.status,
         quota: { ...a.quota },
         remaining: this._remainingSummary(a.quota),
