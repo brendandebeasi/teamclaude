@@ -44,6 +44,10 @@ switch (command) {
     await removeCommand();
     process.exit(0);
     break;
+  case 'priority':
+    await priorityCommand();
+    process.exit(0);
+    break;
   case 'api':
     await apiCommand();
     process.exit(0);
@@ -428,7 +432,7 @@ async function statusCommand() {
       const current = acct.name === data.currentAccount ? ' *' : '';
 
       console.log(`  ${acct.name} (${acct.type})${current}`);
-      console.log(`    Status:   ${acct.status}`);
+      console.log(`    Status:   ${acct.status}    Priority: ${acct.priority ?? 0}`);
       if (acct.orgName) console.log(`    Org:      ${acct.orgName}`);
 
       if (q.unified5h != null || q.unified7d != null) {
@@ -630,19 +634,13 @@ async function apiCommand() {
 
 // ── remove ──────────────────────────────────────────────────
 
-async function removeCommand() {
-  const config = await loadOrCreateConfig();
-  const name = args[1];
-  const org = argValue('--org');
-
-  if (!name) {
-    console.error('Usage: teamclaude remove <account-name|email> [--org <orgName>]');
-    process.exit(1);
-  }
-
-  // Match the exact display name, or — since the same email can span multiple
-  // orgs (named "email (orgName)") — the bare email of any such account. --org
-  // disambiguates when an email maps to more than one org.
+/**
+ * Resolve a single account from a CLI identifier. Matches the exact display
+ * name, or — since the same email can span multiple orgs (named "email
+ * (orgName)") — the bare email of any such account; --org disambiguates.
+ * Exits with a helpful message on no match or an ambiguous match.
+ */
+function resolveAccount(config, name, org, verb) {
   const emailBase = a => a.name.replace(/ \([^()]*\)$/, '');
   let matches = config.accounts.filter(a => a.name === name || emailBase(a) === name);
   if (org) matches = matches.filter(a => (a.orgName || '') === org);
@@ -654,14 +652,55 @@ async function removeCommand() {
   if (matches.length > 1) {
     console.error(`"${name}" is ambiguous — it matches ${matches.length} accounts:`);
     for (const m of matches) console.error(`  - ${m.name}${m.orgName ? `   [org: ${m.orgName}]` : ''}`);
-    console.error('\nRe-run with the exact account name, or add --org <orgName>.');
+    console.error(`\nRe-run with the exact account name, or add --org <orgName> to ${verb}.`);
+    process.exit(1);
+  }
+  return matches[0];
+}
+
+async function removeCommand() {
+  const config = await loadOrCreateConfig();
+  const name = args[1];
+  const org = argValue('--org');
+
+  if (!name) {
+    console.error('Usage: teamclaude remove <account-name|email> [--org <orgName>]');
     process.exit(1);
   }
 
-  const target = matches[0];
+  const target = resolveAccount(config, name, org, 'remove');
   config.accounts.splice(config.accounts.indexOf(target), 1);
   await saveConfig(config);
   console.log(`Removed account "${target.name}"`);
+  await notifyRunningServer(config);
+}
+
+// ── priority ─────────────────────────────────────────────────
+
+async function priorityCommand() {
+  const config = await loadOrCreateConfig();
+  const name = args[1];
+  const org = argValue('--org');
+  const first = args.includes('--first');
+  const last = args.includes('--last');
+  const nArg = args[2] && !args[2].startsWith('--') ? parseInt(args[2], 10) : NaN;
+
+  if (!name || (!first && !last && !Number.isFinite(nArg))) {
+    console.error('Usage: teamclaude priority <account-name|email> <n|--first|--last> [--org <orgName>]');
+    console.error('  Lower number = used first (default 0). --first/--last rank relative to others.');
+    process.exit(1);
+  }
+
+  const target = resolveAccount(config, name, org, 'set priority for');
+  const priorities = config.accounts.map(a => Number.isFinite(a.priority) ? a.priority : 0);
+  let priority;
+  if (first) priority = Math.min(0, ...priorities) - 1;
+  else if (last) priority = Math.max(0, ...priorities) + 1;
+  else priority = nArg;
+
+  target.priority = priority;
+  await saveConfig(config);
+  console.log(`Set "${target.name}" priority to ${priority}${first ? ' (first)' : last ? ' (last)' : ''}`);
   await notifyRunningServer(config);
 }
 
@@ -682,12 +721,14 @@ Commands:
   status              Show proxy & account status (live)
   accounts            List configured accounts
   remove <name>       Remove an account (by exact name or email; --org to disambiguate)
+  priority <name> <n> Set rotation priority (lower = used first); --first/--last
   api <path>          Call an API endpoint with account credentials
   help                Show this help
 
 Options:
   --name NAME         Set account name (import/login)
-  --org NAME          Disambiguate remove when an email spans multiple orgs
+  --org NAME          Disambiguate remove/priority when an email spans multiple orgs
+  --first / --last    With priority: rank an account ahead of / behind all others
   --from PATH         Credentials path (import, default: ~/.claude/.credentials.json)
   --json JSON         Import from inline JSON (import), e.g.:
                       --json '{"accessToken":"...","refreshToken":"...","expiresAt":1234}'
@@ -855,6 +896,8 @@ async function syncAccountsFromDisk(diskConfig, memConfig, accountManager) {
     if (diskAcct.orgUuid && !mgr.orgUuid) mgr.orgUuid = diskAcct.orgUuid;
     if (diskAcct.orgName && !mgr.orgName) mgr.orgName = diskAcct.orgName;
     if (diskAcct.name && mgr.name !== diskAcct.name) mgr.name = diskAcct.name;
+    const diskPriority = Number.isFinite(diskAcct.priority) ? diskAcct.priority : 0;
+    if (mgr.priority !== diskPriority) mgr.priority = diskPriority;
 
     // Existing account — resolve fresh credentials from disk
     let freshCred = null;
